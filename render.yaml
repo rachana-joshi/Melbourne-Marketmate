@@ -1,0 +1,7 @@
+services:
+- type: web
+  name: melbourne-marketmate   # ✅ Lowercase with dashes – totally fine
+  env: python
+  plan: free
+  buildCommand: "pip install -r requirements.txt"
+  startCommand: "python main.py"

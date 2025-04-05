@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Melbourne MarketMate – Client Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body { font-family: Arial; background: #f1f9ff; padding: 20px; }
+    h1 { text-align: center; color: #003366; }
+    .nav { text-align: center; margin-bottom: 20px; }
+    .nav a {
+      text-decoration: none; background-color: #003366;
+      color: white; padding: 10px 20px; border-radius: 6px;
+    }
+    .form-box {
+      background: white; padding: 20px; border-radius: 10px;
+      box-shadow: 0 0 10px rgba(0,0,0,0.1); width: 90%; margin: auto; margin-bottom: 30px;
+    }
+    .form-box h2 { color: #003366; text-align: center; }
+    .form-box form { display: flex; flex-wrap: wrap; gap: 15px; justify-content: center; align-items: center; }
+    .form-box select, .form-box button {
+      padding: 8px; font-size: 14px; min-width: 180px;
+    }
+    .result { text-align: center; font-size: 18px; margin-top: 10px; font-weight: bold; color: #004d00; }
+
+    .filters { display: flex; gap: 15px; flex-wrap: wrap; justify-content: center; margin-bottom: 20px; }
+    .filters select, .filters input[type=range] { padding: 6px; min-width: 150px; }
+
+    .dashboard { display: flex; flex-wrap: wrap; gap: 20px; justify-content: center; }
+    .chart-box {
+      background: white; padding: 20px; border-radius: 10px;
+      box-shadow: 0 0 10px rgba(0,0,0,0.1); width: 45%;
+    }
+    .wide { width: 90% !important; }
+    table { width: 100%; border-collapse: collapse; margin-top: 30px; }
+    th, td { border: 1px solid #ccc; padding: 8px; text-align: left; font-size: 13px; }
+    th { background-color: #e1f0ff; }
+  </style>
+</head>
+<body>
+  <h1>Melbourne MarketMate – Client Dashboard</h1>
+  <div class="nav">
+    <a href="/agent">Switch to Agent Dashboard</a>
+  </div>
+
+  <div class="form-box">
+    <h2>🔮 Predict Your House Price</h2>
+    <form id="predict-form">
+      <select id="suburb-select" required><option value="">Select Suburb</option></select>
+      <select id="type-select" required><option value="">Select Type</option></select>
+      <select id="rooms-select" required><option value="">Select Rooms</option></select>
+      <button type="submit">Predict Price</button>
+    </form>
+    <div class="result" id="predicted-result"></div>
+  </div>
+
+  <div class="filters">
+    <select id="filter-suburb"><option value="">All Suburbs</option></select>
+    <select id="filter-type"><option value="">All Types</option></select>
+    <select id="filter-rooms"><option value="">All Rooms</option></select>
+    <label>Max Price:
+      <input type="range" id="filter-price" min="100000" max="3000000" step="100000" value="3000000">
+      <span id="label-price">$3M</span>
+    </label>
+    <label>Max Distance:
+      <input type="range" id="filter-distance" min="1" max="50" step="1" value="50">
+      <span id="label-distance">50 km</span>
+    </label>
+  </div>
+
+  <div class="dashboard">
+    <div class="chart-box"><h3>Suburb Median Price Comparison</h3><canvas id="chart-suburb"></canvas></div>
+    <div class="chart-box"><h3>Median Price by Room Count</h3><canvas id="chart-room"></canvas></div>
+    <div class="chart-box"><h3>Actual vs Predicted Price</h3><canvas id="chart-scatter"></canvas></div>
+    <div class="chart-box"><h3>Property Type Share</h3><canvas id="chart-type"></canvas></div>
+    <div class="chart-box wide"><h3>Region-wise: Actual vs Predicted Average Prices</h3><canvas id="chart-region-comparison"></canvas></div>
+  </div>
+
+  <h3 style="margin-top:40px;">Filtered Listings</h3>
+  <table id="listing-table"></table>
+
+  <script>
+    let data = [], filtered = [], charts = [];
+
+    fetch("/api/data")
+      .then(res => res.json())
+      .then(d => {
+        data = d.filter(x => x.Actual_Price && !isNaN(x.Actual_Price));
+        populateFilters(data);
+        applyFilters();
+      });
+
+    function populateFilters(d) {
+      const unique = (key) => [...new Set(d.map(x => x[key]).filter(Boolean))].sort();
+      for (let val of unique("Suburb")) {
+        document.getElementById("filter-suburb").innerHTML += `<option value="${val}">${val}</option>`;
+        document.getElementById("suburb-select").innerHTML += `<option value="${val}">${val}</option>`;
+      }
+      for (let val of unique("Type")) {
+        document.getElementById("filter-type").innerHTML += `<option value="${val}">${val}</option>`;
+        document.getElementById("type-select").innerHTML += `<option value="${val}">${val}</option>`;
+      }
+      for (let val of unique("Rooms")) {
+        if (+val <= 15) {
+          document.getElementById("filter-rooms").innerHTML += `<option value="${val}">${val} Rooms</option>`;
+          document.getElementById("rooms-select").innerHTML += `<option value="${val}">${val}</option>`;
+        }
+      }
+
+      document.querySelectorAll('.filters select, .filters input[type=range]')
+        .forEach(el => el.addEventListener('change', applyFilters));
+
+      document.getElementById("predict-form").addEventListener("submit", handlePredict);
+    }
+
+    function applyFilters() {
+      const s = document.getElementById("filter-suburb").value;
+      const t = document.getElementById("filter-type").value;
+      const r = document.getElementById("filter-rooms").value;
+      const p = +document.getElementById("filter-price").value;
+      const d = +document.getElementById("filter-distance").value;
+
+      document.getElementById("label-price").innerText = `$${p.toLocaleString()}`;
+      document.getElementById("label-distance").innerText = `${d} km`;
+
+      filtered = data.filter(row =>
+        (!s || row.Suburb === s) &&
+        (!t || row.Type === t) &&
+        (!r || row.Rooms == r) &&
+        (row.Actual_Price <= p) &&
+        (!row.Distance || row.Distance <= d)
+      );
+
+      updateCharts();
+      updateTable();
+    }
+
+    function handlePredict(e) {
+      e.preventDefault();
+      const suburb = document.getElementById("suburb-select").value;
+      const type = document.getElementById("type-select").value;
+      const rooms = document.getElementById("rooms-select").value;
+
+      const matches = data.filter(row =>
+        row.Suburb === suburb &&
+        row.Type === type &&
+        row.Rooms == rooms
+      );
+
+      if (matches.length > 0) {
+        const avg = Math.round(matches.reduce((sum, row) => sum + +row.Predicted_Price, 0) / matches.length);
+        document.getElementById("predicted-result").innerText = `Estimated Price: $${avg.toLocaleString()}`;
+      } else {
+        document.getElementById("predicted-result").innerText = "No match found for selected criteria.";
+      }
+    }
+
+    function median(arr) {
+      const sorted = arr.slice().sort((a,b) => a - b);
+      const mid = Math.floor(sorted.length / 2);
+      return sorted.length % 2 === 0 ? (sorted[mid-1] + sorted[mid]) / 2 : sorted[mid];
+    }
+
+    function updateCharts() {
+      const ctx = id => document.getElementById(id).getContext('2d');
+      const destroy = id => charts[id] && charts[id].destroy();
+
+      // Suburb Median Price
+      const suburbGroups = {};
+      filtered.forEach(d => {
+        if (!suburbGroups[d.Suburb]) suburbGroups[d.Suburb] = [];
+        suburbGroups[d.Suburb].push(+d.Actual_Price);
+      });
+      const medSuburbs = Object.entries(suburbGroups)
+        .map(([k, v]) => ({ label: k, value: median(v) }))
+        .sort((a,b) => a.value - b.value)
+        .slice(0, 10);
+
+      destroy("chart-suburb");
+      charts["chart-suburb"] = new Chart(ctx("chart-suburb"), {
+        type: "bar",
+        data: {
+          labels: medSuburbs.map(x => x.label),
+          datasets: [{ label: "Median Price", data: medSuburbs.map(x => x.value) }]
+        }
+      });
+
+      // Room Median Price
+      const roomGroups = {};
+      filtered.forEach(d => {
+        if (!roomGroups[d.Rooms]) roomGroups[d.Rooms] = [];
+        roomGroups[d.Rooms].push(+d.Actual_Price);
+      });
+      const roomData = Object.entries(roomGroups)
+        .map(([k,v]) => ({ label: `${k} rooms`, value: median(v) }))
+        .sort((a,b) => parseInt(a.label) - parseInt(b.label));
+
+      destroy("chart-room");
+      charts["chart-room"] = new Chart(ctx("chart-room"), {
+        type: "line",
+        data: {
+          labels: roomData.map(x => x.label),
+          datasets: [{
+            label: "Median Price",
+            data: roomData.map(x => x.value),
+            fill: true,
+            backgroundColor: "rgba(0,100,200,0.1)",
+            borderColor: "#003366"
+          }]
+        }
+      });
+
+      // Actual vs Predicted Scatter
+      destroy("chart-scatter");
+      charts["chart-scatter"] = new Chart(ctx("chart-scatter"), {
+        type: "scatter",
+        data: {
+          datasets: [{
+            label: "Actual vs Predicted",
+            data: filtered.map(d => ({ x: +d.Predicted_Price, y: +d.Actual_Price })),
+            backgroundColor: "rgba(0, 150, 150, 0.5)"
+          }]
+        },
+        options: {
+          scales: {
+            x: { title: { display: true, text: 'Predicted Price ($)' }},
+            y: { title: { display: true, text: 'Actual Price ($)' }}
+          }
+        }
+      });
+
+      // Property Type Pie
+      const typeCount = {};
+      filtered.forEach(d => {
+        if (!typeCount[d.Type]) typeCount[d.Type] = 0;
+        typeCount[d.Type]++;
+      });
+
+      destroy("chart-type");
+      charts["chart-type"] = new Chart(ctx("chart-type"), {
+        type: "pie",
+        data: {
+          labels: Object.keys(typeCount),
+          datasets: [{ label: "Property Type", data: Object.values(typeCount) }]
+        }
+      });
+
+      // Region-wise Comparison Chart
+      destroy("chart-region-comparison");
+
+      const regionGroups = {};
+      filtered.forEach(d => {
+        if (!regionGroups[d.Regionname]) regionGroups[d.Regionname] = { actual: [], predicted: [] };
+        regionGroups[d.Regionname].actual.push(+d.Actual_Price);
+        regionGroups[d.Regionname].predicted.push(+d.Predicted_Price);
+      });
+
+      const regionLabels = Object.keys(regionGroups);
+      const avgActual = regionLabels.map(r => {
+        const arr = regionGroups[r].actual;
+        return arr.reduce((sum, val) => sum + val, 0) / arr.length;
+      });
+      const avgPredicted = regionLabels.map(r => {
+        const arr = regionGroups[r].predicted;
+        return arr.reduce((sum, val) => sum + val, 0) / arr.length;
+      });
+
+      charts["chart-region-comparison"] = new Chart(ctx("chart-region-comparison"), {
+        type: "bar",
+        data: {
+          labels: regionLabels,
+          datasets: [
+            {
+              label: "Average Actual Price ($)",
+              data: avgActual,
+              backgroundColor: "rgba(0, 123, 255, 0.6)"
+            },
+            {
+              label: "Average Predicted Price ($)",
+              data: avgPredicted,
+              backgroundColor: "rgba(40, 167, 69, 0.6)"
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          plugins: {
+            tooltip: { mode: 'index', intersect: false }
+          },
+          scales: {
+            y: {
+              title: { display: true, text: 'Price ($)' },
+              ticks: {
+                callback: function(value) {
+                  return '$' + value.toLocaleString();
+                }
+              }
+            },
+            x: {
+              title: { display: true, text: 'Region' }
+            }
+          }
+        }
+      });
+    }
+
+    function updateTable() {
+      const headers = ["Address", "Suburb", "Actual_Price", "Predicted_Price", "Rooms", "Type"];
+      let html = "<tr>" + headers.map(h => `<th>${h}</th>`).join("") + "</tr>";
+      filtered.slice(0, 15).forEach(row => {
+        html += "<tr>" + headers.map(k => `<td>${row[k] || "—"}</td>`).join("") + "</tr>";
+      });
+      document.getElementById("listing-table").innerHTML = html;
+    }
+  </script>
+</body>
+</html>

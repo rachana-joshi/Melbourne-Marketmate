@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Melbourne MarketMate – Agent Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body { font-family: Arial; background: #fffaf3; padding: 20px; }
+    h1 { text-align: center; color: #7f4f00; }
+    .filters { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; margin-bottom: 20px; }
+    .filters select { padding: 6px; min-width: 150px; }
+    .dashboard { display: flex; flex-wrap: wrap; justify-content: center; gap: 20px; }
+    .chart-box {
+      background: white; padding: 20px; border-radius: 10px;
+      box-shadow: 0 0 10px rgba(0,0,0,0.1); width: 45%;
+    }
+    .wide { width: 90% !important; }
+    .nav { text-align: center; margin-bottom: 20px; }
+    .nav a {
+      text-decoration: none; background-color: #7f4f00;
+      color: white; padding: 10px 20px; border-radius: 6px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Melbourne MarketMate – Agent Dashboard</h1>
+
+  <div class="nav">
+    <a href="/">Switch to Client Dashboard</a>
+  </div>
+
+  <div class="filters">
+    <select id="filter-region"><option value="">All Regions</option></select>
+    <select id="filter-method"><option value="">All Sale Methods</option></select>
+    <select id="filter-rooms"><option value="">All Room Counts</option></select>
+  </div>
+
+  <div class="dashboard">
+    <div class="chart-box"><h3>Top Suburbs by Listings</h3><canvas id="chart-suburbs"></canvas></div>
+    <div class="chart-box"><h3>Median Price by Seller</h3><canvas id="chart-seller"></canvas></div>
+    <div class="chart-box"><h3>Sale Method Breakdown</h3><canvas id="chart-method"></canvas></div>
+    <div class="chart-box"><h3>Room Count Distribution</h3><canvas id="chart-rooms"></canvas></div>
+    <div class="chart-box wide"><h3>Median Price by Region</h3><canvas id="chart-region"></canvas></div>
+  </div>
+
+  <script>
+    let data = [], filtered = [], charts = {};
+
+    fetch('/api/data')
+      .then(res => res.json())
+      .then(d => {
+        data = d.filter(x => x.Actual_Price && !isNaN(x.Actual_Price));
+        populateFilters();
+        applyFilters();
+      });
+
+    function populateFilters() {
+      const unique = (key) => [...new Set(data.map(x => x[key]).filter(Boolean))];
+      const regions = unique("Regionname").sort();
+      const methods = unique("Method").sort();
+      const rooms = unique("Rooms").sort((a,b) => +a - +b);
+
+      for (let val of regions) document.getElementById("filter-region").innerHTML += `<option value="${val}">${val}</option>`;
+      for (let val of methods) document.getElementById("filter-method").innerHTML += `<option value="${val}">${val}</option>`;
+      for (let val of rooms) document.getElementById("filter-rooms").innerHTML += `<option value="${val}">${val} rooms</option>`;
+
+      document.querySelectorAll('.filters select').forEach(el => el.addEventListener('change', applyFilters));
+    }
+
+    function applyFilters() {
+      const region = document.getElementById("filter-region").value;
+      const method = document.getElementById("filter-method").value;
+      const rooms = document.getElementById("filter-rooms").value;
+
+      filtered = data.filter(d =>
+        (!region || d.Regionname === region) &&
+        (!method || d.Method === method) &&
+        (!rooms || d.Rooms == rooms)
+      );
+
+      updateCharts();
+    }
+
+    function median(arr) {
+      const sorted = arr.slice().sort((a,b) => a - b);
+      const mid = Math.floor(sorted.length / 2);
+      return sorted.length % 2 === 0 ? (sorted[mid-1] + sorted[mid]) / 2 : sorted[mid];
+    }
+
+    function updateCharts() {
+      const ctx = id => document.getElementById(id).getContext('2d');
+      const destroy = id => charts[id] && charts[id].destroy();
+
+      // Chart 1 – Suburb listing count
+      const subCount = {};
+      filtered.forEach(d => {
+        if (!subCount[d.Suburb]) subCount[d.Suburb] = 0;
+        subCount[d.Suburb]++;
+      });
+      const suburbData = Object.entries(subCount).sort((a,b) => b[1] - a[1]).slice(0, 10);
+      destroy("chart-suburbs");
+      charts["chart-suburbs"] = new Chart(ctx("chart-suburbs"), {
+        type: "bar",
+        data: {
+          labels: suburbData.map(x => x[0]),
+          datasets: [{ label: "Listings", data: suburbData.map(x => x[1]) }]
+        }
+      });
+
+      // Chart 2 – Median price by Seller
+      const sellerGroups = {};
+      filtered.forEach(d => {
+        if (!sellerGroups[d.SellerG]) sellerGroups[d.SellerG] = [];
+        sellerGroups[d.SellerG].push(+d.Actual_Price);
+      });
+      const sellerData = Object.entries(sellerGroups)
+        .map(([k,v]) => ({ label: k, value: median(v) }))
+        .sort((a,b) => b.value - a.value).slice(0, 10);
+      destroy("chart-seller");
+      charts["chart-seller"] = new Chart(ctx("chart-seller"), {
+        type: "line",
+        data: {
+          labels: sellerData.map(x => x.label),
+          datasets: [{ label: "Median Price", data: sellerData.map(x => x.value), borderColor: "#aa6600", fill: false }]
+        }
+      });
+
+      // Chart 3 – Method breakdown
+      const methodCount = {};
+      filtered.forEach(d => {
+        if (!methodCount[d.Method]) methodCount[d.Method] = 0;
+        methodCount[d.Method]++;
+      });
+      destroy("chart-method");
+      charts["chart-method"] = new Chart(ctx("chart-method"), {
+        type: "pie",
+        data: {
+          labels: Object.keys(methodCount),
+          datasets: [{ label: "Sales", data: Object.values(methodCount) }]
+        }
+      });
+
+      // Chart 4 – Room count distribution
+      const roomDist = {};
+      filtered.forEach(d => {
+        if (!roomDist[d.Rooms]) roomDist[d.Rooms] = 0;
+        roomDist[d.Rooms]++;
+      });
+      destroy("chart-rooms");
+      charts["chart-rooms"] = new Chart(ctx("chart-rooms"), {
+        type: "bar",
+        data: {
+          labels: Object.keys(roomDist),
+          datasets: [{ label: "Properties", data: Object.values(roomDist) }]
+        }
+      });
+
+      // Chart 5 – Region median prices
+      const regionGroups = {};
+      filtered.forEach(d => {
+        if (!regionGroups[d.Regionname]) regionGroups[d.Regionname] = [];
+        regionGroups[d.Regionname].push(+d.Actual_Price);
+      });
+      const regionData = Object.entries(regionGroups).map(([k,v]) => ({
+        label: k, value: median(v)
+      })).sort((a,b) => b.value - a.value);
+      destroy("chart-region");
+      charts["chart-region"] = new Chart(ctx("chart-region"), {
+        type: "bar",
+        data: {
+          labels: regionData.map(x => x.label),
+          datasets: [{ label: "Median Price", data: regionData.map(x => x.value), backgroundColor: "#ffcc99" }]
+        }
+      });
+    }
+  </script>
+</body>
+</html>
