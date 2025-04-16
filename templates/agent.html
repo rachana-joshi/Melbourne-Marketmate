@@ -46,6 +46,14 @@
   <script>
     let data = [], filtered = [], charts = {};
 
+    const methodLabels = {
+      "S": "Sold",
+      "SP": "Sold Prior",
+      "PI": "Passed In",
+      "VB": "Vendor Bid",
+      "SA": "Sold After"
+    };
+
     fetch('/api/data')
       .then(res => res.json())
       .then(d => {
@@ -61,7 +69,7 @@
       const rooms = unique("Rooms").sort((a,b) => +a - +b);
 
       for (let val of regions) document.getElementById("filter-region").innerHTML += `<option value="${val}">${val}</option>`;
-      for (let val of methods) document.getElementById("filter-method").innerHTML += `<option value="${val}">${val}</option>`;
+      for (let val of methods) document.getElementById("filter-method").innerHTML += `<option value="${val}">${methodLabels[val] || val}</option>`;
       for (let val of rooms) document.getElementById("filter-rooms").innerHTML += `<option value="${val}">${val} rooms</option>`;
 
       document.querySelectorAll('.filters select').forEach(el => el.addEventListener('change', applyFilters));
@@ -74,7 +82,7 @@
 
       filtered = data.filter(d =>
         (!region || d.Regionname === region) &&
-        (!method || d.Method === method) &&
+        (!method || methodLabels[d.Method] === method || d.Method === method) &&
         (!rooms || d.Rooms == rooms)
       );
 
@@ -103,7 +111,13 @@
         type: "bar",
         data: {
           labels: suburbData.map(x => x[0]),
-          datasets: [{ label: "Listings", data: suburbData.map(x => x[1]) }]
+          datasets: [{ label: "Number of Listings", data: suburbData.map(x => x[1]) }]
+        },
+        options: {
+          scales: {
+            x: { title: { display: true, text: "Suburb" } },
+            y: { title: { display: true, text: "Listing Count" } }
+          }
         }
       });
 
@@ -121,11 +135,34 @@
         type: "line",
         data: {
           labels: sellerData.map(x => x.label),
-          datasets: [{ label: "Median Price", data: sellerData.map(x => x.value), borderColor: "#aa6600", fill: false }]
+          datasets: [{
+            label: "Median Price (AUD $)",
+            data: sellerData.map(x => x.value),
+            borderColor: "#aa6600",
+            fill: false
+          }]
+        },
+        options: {
+          scales: {
+            x: { title: { display: true, text: "Seller Group" } },
+            y: {
+              title: { display: true, text: "Median Price (AUD $)" },
+              ticks: {
+                callback: value => 'AUD $' + value.toLocaleString()
+              }
+            }
+          },
+          plugins: {
+            tooltip: {
+              callbacks: {
+                label: ctx => 'AUD $' + ctx.raw.toLocaleString()
+              }
+            }
+          }
         }
       });
 
-      // Chart 3 – Method breakdown
+      // Chart 3 – Sale Method Breakdown
       const methodCount = {};
       filtered.forEach(d => {
         if (!methodCount[d.Method]) methodCount[d.Method] = 0;
@@ -135,8 +172,8 @@
       charts["chart-method"] = new Chart(ctx("chart-method"), {
         type: "pie",
         data: {
-          labels: Object.keys(methodCount),
-          datasets: [{ label: "Sales", data: Object.values(methodCount) }]
+          labels: Object.keys(methodCount).map(m => methodLabels[m] || m),
+          datasets: [{ label: "Sale Methods", data: Object.values(methodCount) }]
         }
       });
 
@@ -152,10 +189,16 @@
         data: {
           labels: Object.keys(roomDist),
           datasets: [{ label: "Properties", data: Object.values(roomDist) }]
+        },
+        options: {
+          scales: {
+            x: { title: { display: true, text: "Number of Rooms" } },
+            y: { title: { display: true, text: "Property Count" } }
+          }
         }
       });
 
-      // Chart 5 – Region median prices
+      // Chart 5 – Median price by Region
       const regionGroups = {};
       filtered.forEach(d => {
         if (!regionGroups[d.Regionname]) regionGroups[d.Regionname] = [];
@@ -169,7 +212,29 @@
         type: "bar",
         data: {
           labels: regionData.map(x => x.label),
-          datasets: [{ label: "Median Price", data: regionData.map(x => x.value), backgroundColor: "#ffcc99" }]
+          datasets: [{
+            label: "Median Price (AUD $)",
+            data: regionData.map(x => x.value),
+            backgroundColor: "#ffcc99"
+          }]
+        },
+        options: {
+          scales: {
+            x: { title: { display: true, text: "Region" } },
+            y: {
+              title: { display: true, text: "Median Price (AUD $)" },
+              ticks: {
+                callback: value => 'AUD $' + value.toLocaleString()
+              }
+            }
+          },
+          plugins: {
+            tooltip: {
+              callbacks: {
+                label: ctx => 'AUD $' + ctx.raw.toLocaleString()
+              }
+            }
+          }
         }
       });
     }

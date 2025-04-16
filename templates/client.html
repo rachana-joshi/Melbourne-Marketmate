@@ -60,9 +60,9 @@
     <select id="filter-rooms"><option value="">All Rooms</option></select>
     <label>Max Price:
       <input type="range" id="filter-price" min="100000" max="3000000" step="100000" value="3000000">
-      <span id="label-price">$3M</span>
+      <span id="label-price">AUD $3M</span>
     </label>
-    <label>Max Distance:
+    <label>Max Distance FRom CBD:
       <input type="range" id="filter-distance" min="1" max="50" step="1" value="50">
       <span id="label-distance">50 km</span>
     </label>
@@ -120,7 +120,7 @@
       const p = +document.getElementById("filter-price").value;
       const d = +document.getElementById("filter-distance").value;
 
-      document.getElementById("label-price").innerText = `$${p.toLocaleString()}`;
+      document.getElementById("label-price").innerText = `AUD $${p.toLocaleString()}`;
       document.getElementById("label-distance").innerText = `${d} km`;
 
       filtered = data.filter(row =>
@@ -149,7 +149,7 @@
 
       if (matches.length > 0) {
         const avg = Math.round(matches.reduce((sum, row) => sum + +row.Predicted_Price, 0) / matches.length);
-        document.getElementById("predicted-result").innerText = `Estimated Price: $${avg.toLocaleString()}`;
+        document.getElementById("predicted-result").innerText = `Estimated Price: AUD $${avg.toLocaleString()}`;
       } else {
         document.getElementById("predicted-result").innerText = "No match found for selected criteria.";
       }
@@ -161,11 +161,15 @@
       return sorted.length % 2 === 0 ? (sorted[mid-1] + sorted[mid]) / 2 : sorted[mid];
     }
 
+    function formatPrice(value) {
+      return `AUD $${Number(value).toLocaleString()}`;
+    }
+
     function updateCharts() {
       const ctx = id => document.getElementById(id).getContext('2d');
       const destroy = id => charts[id] && charts[id].destroy();
 
-      // Suburb Median Price
+      // Suburb Median Price Comparison
       const suburbGroups = {};
       filtered.forEach(d => {
         if (!suburbGroups[d.Suburb]) suburbGroups[d.Suburb] = [];
@@ -182,10 +186,23 @@
         data: {
           labels: medSuburbs.map(x => x.label),
           datasets: [{ label: "Median Price", data: medSuburbs.map(x => x.value) }]
+        },
+        options: {
+          plugins: {
+            tooltip: {
+              callbacks: {
+                label: (ctx) => `${ctx.dataset.label}: AUD $${ctx.raw.toLocaleString()}`
+              }
+            }
+          },
+          scales: {
+            x: { title: { display: true, text: "Suburbs" } },
+            y: { title: { display: true, text: "Median Price (AUD $)" } }
+          }
         }
       });
 
-      // Room Median Price
+      // Median Price by Room Count
       const roomGroups = {};
       filtered.forEach(d => {
         if (!roomGroups[d.Rooms]) roomGroups[d.Rooms] = [];
@@ -207,10 +224,23 @@
             backgroundColor: "rgba(0,100,200,0.1)",
             borderColor: "#003366"
           }]
+        },
+        options: {
+          plugins: {
+            tooltip: {
+              callbacks: {
+                label: (ctx) => `Median Price: AUD $${ctx.raw.toLocaleString()}`
+              }
+            }
+          },
+          scales: {
+            x: { title: { display: true, text: "Number of Rooms" } },
+            y: { title: { display: true, text: "Median Price (AUD $)" } }
+          }
         }
       });
 
-      // Actual vs Predicted Scatter
+      // Actual vs Predicted Price
       destroy("chart-scatter");
       charts["chart-scatter"] = new Chart(ctx("chart-scatter"), {
         type: "scatter",
@@ -222,14 +252,21 @@
           }]
         },
         options: {
+          plugins: {
+            tooltip: {
+              callbacks: {
+                label: (ctx) => `Predicted: AUD $${ctx.raw.x.toLocaleString()}, Actual: AUD $${ctx.raw.y.toLocaleString()}`
+              }
+            }
+          },
           scales: {
-            x: { title: { display: true, text: 'Predicted Price ($)' }},
-            y: { title: { display: true, text: 'Actual Price ($)' }}
+            x: { title: { display: true, text: "Predicted Price (AUD $)" } },
+            y: { title: { display: true, text: "Actual Price (AUD $)" } }
           }
         }
       });
 
-      // Property Type Pie
+      // Property Type Pie Chart
       const typeCount = {};
       filtered.forEach(d => {
         if (!typeCount[d.Type]) typeCount[d.Type] = 0;
@@ -245,9 +282,8 @@
         }
       });
 
-      // Region-wise Comparison Chart
+      // Region-wise Avg Price Chart
       destroy("chart-region-comparison");
-
       const regionGroups = {};
       filtered.forEach(d => {
         if (!regionGroups[d.Regionname]) regionGroups[d.Regionname] = { actual: [], predicted: [] };
@@ -255,50 +291,38 @@
         regionGroups[d.Regionname].predicted.push(+d.Predicted_Price);
       });
 
-      const regionLabels = Object.keys(regionGroups);
-      const avgActual = regionLabels.map(r => {
-        const arr = regionGroups[r].actual;
-        return arr.reduce((sum, val) => sum + val, 0) / arr.length;
-      });
-      const avgPredicted = regionLabels.map(r => {
-        const arr = regionGroups[r].predicted;
-        return arr.reduce((sum, val) => sum + val, 0) / arr.length;
-      });
+      const labels = Object.keys(regionGroups);
+      const avgActual = labels.map(r => regionGroups[r].actual.reduce((a,b) => a + b, 0) / regionGroups[r].actual.length);
+      const avgPredicted = labels.map(r => regionGroups[r].predicted.reduce((a,b) => a + b, 0) / regionGroups[r].predicted.length);
 
       charts["chart-region-comparison"] = new Chart(ctx("chart-region-comparison"), {
         type: "bar",
         data: {
-          labels: regionLabels,
+          labels,
           datasets: [
             {
-              label: "Average Actual Price ($)",
+              label: "Avg Actual Price (AUD $)",
               data: avgActual,
               backgroundColor: "rgba(0, 123, 255, 0.6)"
             },
             {
-              label: "Average Predicted Price ($)",
+              label: "Avg Predicted Price (AUD $)",
               data: avgPredicted,
               backgroundColor: "rgba(40, 167, 69, 0.6)"
             }
           ]
         },
         options: {
-          responsive: true,
           plugins: {
-            tooltip: { mode: 'index', intersect: false }
+            tooltip: {
+              callbacks: {
+                label: (ctx) => `${ctx.dataset.label}: AUD $${ctx.raw.toLocaleString()}`
+              }
+            }
           },
           scales: {
-            y: {
-              title: { display: true, text: 'Price ($)' },
-              ticks: {
-                callback: function(value) {
-                  return '$' + value.toLocaleString();
-                }
-              }
-            },
-            x: {
-              title: { display: true, text: 'Region' }
-            }
+            x: { title: { display: true, text: "Region" } },
+            y: { title: { display: true, text: "Price (AUD $)" } }
           }
         }
       });
